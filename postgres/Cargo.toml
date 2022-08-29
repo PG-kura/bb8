@@ -22,7 +22,8 @@ rust-version = "1.56"
 async-trait = "0.1"
 bb8 = { version = "0.8", path = "../bb8" }
 tokio = { version = "1.0.0", features = ["rt"] }
-tokio-postgres = "0.7"
+#tokio-postgres = "0.7"
+tokio-postgres = { git = "https://github.com/sfackler/rust-postgres.git", branch = "master"}
 
 [dev-dependencies]
 futures-util = "0.3.2"
