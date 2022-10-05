@@ -60,7 +60,11 @@ where
         let (client, connection) = self.config.connect(self.tls.clone()).await?;
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own.
-        tokio::spawn(async move { connection.await.map(|_| ()) });
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                log::warn!("Connection got error: {:?}", &e);
+            }
+        });
         Ok(client)
     }
 
