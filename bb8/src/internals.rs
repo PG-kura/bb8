@@ -188,8 +188,11 @@ impl<M: ManageConnection> InternalsGuard<M> {
 impl<M: ManageConnection> Drop for InternalsGuard<M> {
     fn drop(&mut self) {
         if let Some(conn) = self.conn.take() {
+            log::info!("InternalGurad::drop() aquire lock");
             let mut locked = self.pool.internals.lock();
+            log::info!("InternalGurad::drop() got lock");
             locked.put(conn, None, self.pool.clone());
+            log::info!("InternalGurad::drop() end");
         }
     }
 }

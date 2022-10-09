@@ -161,7 +161,9 @@ where
             }
         });
 
+        log::info!("bb8::put_back() aquire lock");
         let mut locked = self.inner.internals.lock();
+        log::info!("bb8::put_back() got lock");
         match conn {
             Some(conn) => locked.put(conn, None, self.inner.clone()),
             None => {

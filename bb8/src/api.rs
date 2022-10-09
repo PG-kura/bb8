@@ -389,7 +389,9 @@ where
     M: ManageConnection,
 {
     fn drop(&mut self) {
+        log::info!("PooledConnection::drop() start");
         self.pool.as_ref().put_back(self.conn.take());
+        log::info!("PooledConnection::drop() end");
     }
 }
 
