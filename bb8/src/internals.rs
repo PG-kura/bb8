@@ -200,6 +200,7 @@ impl<M: ManageConnection> Drop for InternalsGuard<M> {
 }
 
 #[must_use]
+#[derive(Debug)]
 pub(crate) struct ApprovalIter {
     num: usize,
 }

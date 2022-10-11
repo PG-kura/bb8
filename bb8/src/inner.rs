@@ -126,6 +126,9 @@ where
                 match locked.pop(&self.inner.statics) {
                     Some((conn, approvals)) => {
                         self.spawn_replenishing_approvals(approvals);
+
+                        // make_pooled_conn = |this, conn| PooledConnection::new(this, conn)
+
                         make_pooled_conn(self, conn)
                     }
                     None => {
@@ -157,6 +160,7 @@ where
                 let mut locked = self.inner.internals.lock();
                 log::info!("PoolInner::make_pooled(2) got lock");
                 let approvals = locked.push_waiter(tx, &self.inner.statics);
+                log::info!("PoolInner::make_pooled(2) approvals: {:?}", approvals);
                 self.spawn_replenishing_approvals(approvals);
             };
             log::info!("PoolInner::make_pooled(2) release lock");
@@ -169,6 +173,7 @@ where
                     log::info!("PoolInner::make_pooled(3) extract");
                     let extracted = guard.extract();
                     log::info!("PoolInner::make_pooled(3) make_pooled_conn() start");
+                    // make_pooled_conn = |this, conn| PooledConnection::new(this, conn)
                     let res = make_pooled_conn(self, extracted);
                     log::info!("PoolInner::make_pooled(3) make_pooled_conn() ended");
                     Ok(res)
@@ -259,10 +264,17 @@ where
             match conn {
                 Ok(conn) => {
                     let conn = Conn::new(conn);
-                    shared
-                        .internals
-                        .lock()
-                        .put(conn, Some(approval), self.inner.clone());
+
+                    {
+                        log::info!("PoolInner::add_connection(0) aquire lock");
+                        let mut locked = shared
+                            .internals
+                            .lock();
+                        log::info!("PoolInner::add_connection(0) got lock");
+                        locked.put(conn, Some(approval), self.inner.clone());
+                    }
+                    log::info!("PoolInner::add_connection(0) release lock");
+
                     return Ok(());
                 }
                 Err(e) => {
