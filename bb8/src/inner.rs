@@ -40,7 +40,13 @@ where
     }
 
     pub(crate) async fn start_connections(&self) -> Result<(), M::Error> {
-        let wanted = self.inner.internals.lock().wanted(&self.inner.statics);
+        log::info!("PoolInner::start_connections() aquire lock");
+        let wanted = {
+            let mut locked = self.inner.internals.lock();
+            log::info!("PoolInner::start_connections() got lock");
+            locked.wanted(&self.inner.statics)
+        };
+        log::info!("PoolInner::start_connections() release lock");
         let mut stream = self.replenish_idle_connections(wanted);
         while let Some(result) = stream.next().await {
             result?;
@@ -49,8 +55,14 @@ where
     }
 
     pub(crate) fn spawn_start_connections(&self) {
-        let mut locked = self.inner.internals.lock();
-        self.spawn_replenishing_approvals(locked.wanted(&self.inner.statics));
+        let res = {
+            log::info!("PoolInner::spawn_start_connections() aquire lock");
+            let mut locked = self.inner.internals.lock();
+            log::info!("PoolInner::spawn_start_connections() got lock");
+            self.spawn_replenishing_approvals(locked.wanted(&self.inner.statics));
+        };
+        log::info!("PoolInner::spawn_start_connections() release lock");
+        res
     }
 
     fn spawn_replenishing_approvals(&self, approvals: ApprovalIter) {
@@ -108,7 +120,9 @@ where
     {
         loop {
             let mut conn = {
+                log::info!("PoolInner::make_pooled(1) aquire lock");
                 let mut locked = self.inner.internals.lock();
+                log::info!("PoolInner::make_pooled(1) got lock");
                 match locked.pop(&self.inner.statics) {
                     Some((conn, approvals)) => {
                         self.spawn_replenishing_approvals(approvals);
@@ -117,6 +131,7 @@ where
                     None => break,
                 }
             };
+            log::info!("PoolInner::make_pooled(1) release lock");
 
             if !self.inner.statics.test_on_check_out {
                 return Ok(conn);
@@ -134,9 +149,15 @@ where
 
         let (tx, rx) = oneshot::channel();
         {
-            let mut locked = self.inner.internals.lock();
-            let approvals = locked.push_waiter(tx, &self.inner.statics);
-            self.spawn_replenishing_approvals(approvals);
+            let res = {
+                log::info!("PoolInner::make_pooled(2) aquire lock");
+                let mut locked = self.inner.internals.lock();
+                log::info!("PoolInner::make_pooled(2) got lock");
+                let approvals = locked.push_waiter(tx, &self.inner.statics);
+                self.spawn_replenishing_approvals(approvals);
+            };
+            log::info!("PoolInner::make_pooled(2) release lock");
+            res
         };
 
         match timeout(self.inner.statics.connection_timeout, rx).await {
@@ -153,35 +174,52 @@ where
 
     /// Return connection back in to the pool
     pub(crate) fn put_back(&self, conn: Option<Conn<M::Connection>>) {
-        let conn = conn.and_then(|mut conn| {
-            if !self.inner.manager.has_broken(&mut conn.conn) {
-                Some(conn)
-            } else {
-                None
-            }
-        });
+        let res = {
+            let conn = conn.and_then(|mut conn| {
+                if !self.inner.manager.has_broken(&mut conn.conn) {
+                    Some(conn)
+                } else {
+                    None
+                }
+            });
 
-        log::info!("bb8::put_back() aquire lock");
-        let mut locked = self.inner.internals.lock();
-        log::info!("bb8::put_back() got lock");
-        match conn {
-            Some(conn) => locked.put(conn, None, self.inner.clone()),
-            None => {
-                let approvals = locked.dropped(1, &self.inner.statics);
-                self.spawn_replenishing_approvals(approvals);
+            log::info!("PoolInner::put_back() aquire lock");
+            let mut locked = self.inner.internals.lock();
+            log::info!("PoolInner::put_back() got lock");
+            match conn {
+                Some(conn) => locked.put(conn, None, self.inner.clone()),
+                None => {
+                    let approvals = locked.dropped(1, &self.inner.statics);
+                    self.spawn_replenishing_approvals(approvals);
+                }
             }
-        }
+        };
+        log::info!("PoolInner::put_back() release lock");
+        res
     }
 
     /// Returns information about the current state of the pool.
     pub(crate) fn state(&self) -> State {
-        self.inner.internals.lock().state()
+        let res = {
+            log::info!("PoolInner::state() aquire lock");
+            let locked = self.inner.internals.lock();
+            log::info!("PoolInner::state() got lock");
+            locked.state()
+        };
+        log::info!("PoolInner::state() release lock");
+        res
     }
 
     fn reap(&self) {
-        let mut internals = self.inner.internals.lock();
-        let approvals = internals.reap(&self.inner.statics);
-        self.spawn_replenishing_approvals(approvals);
+        let res = {
+            log::info!("PoolInner::reap() aquire lock");
+            let mut internals = self.inner.internals.lock();
+            log::info!("PoolInner::reap() got lock");
+            let approvals = internals.reap(&self.inner.statics);
+            self.spawn_replenishing_approvals(approvals);
+        };
+        log::info!("PoolInner::reap() release lock");
+        res
     }
 
     // Outside of Pool to avoid borrow splitting issues on self
@@ -215,9 +253,15 @@ where
                 }
                 Err(e) => {
                     if Instant::now() - start > self.inner.statics.connection_timeout {
-                        let mut locked = shared.internals.lock();
-                        locked.connect_failed(approval);
-                        return Err(e);
+                        let res = {
+                            log::info!("PoolInner::add_connection() aquire lock");
+                            let mut locked = shared.internals.lock();
+                            log::info!("PoolInner::add_connection() got lock");
+                            locked.connect_failed(approval);
+                            Err(e)
+                        };
+                        log::info!("PoolInner::add_connection() release lock");
+                        return res;
                     } else {
                         delay = max(Duration::from_millis(200), delay);
                         delay = min(self.inner.statics.connection_timeout / 2, delay * 2);
