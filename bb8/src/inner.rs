@@ -128,7 +128,10 @@ where
                         self.spawn_replenishing_approvals(approvals);
                         make_pooled_conn(self, conn)
                     }
-                    None => break,
+                    None => {
+                        log::info!("PoolInner::make_pooled(1) break loop");
+                        break
+                    },
                 }
             };
             log::info!("PoolInner::make_pooled(1) release lock");
@@ -161,7 +164,18 @@ where
         };
 
         match timeout(self.inner.statics.connection_timeout, rx).await {
-            Ok(Ok(mut guard)) => Ok(make_pooled_conn(self, guard.extract())),
+            Ok(Ok(mut guard)) => {
+                let res = {
+                    log::info!("PoolInner::make_pooled(3) extract");
+                    let extracted = guard.extract();
+                    log::info!("PoolInner::make_pooled(3) make_pooled_conn() start");
+                    let res = make_pooled_conn(self, extracted);
+                    log::info!("PoolInner::make_pooled(3) make_pooled_conn() ended");
+                    Ok(res)
+                };
+                log::info!("PoolInner::make_pooled(3) guard dropped");
+                res
+            },
             _ => Err(RunError::TimedOut),
         }
     }
