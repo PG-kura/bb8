@@ -11,6 +11,9 @@ use crate::inner::PoolInner;
 use crate::internals::Conn;
 pub use crate::internals::State;
 
+use std::sync::atomic::{ AtomicU32, Ordering};
+use crate::INDEXER;
+
 /// A generic connection pool.
 pub struct Pool<M>
 where
@@ -324,6 +327,7 @@ where
 {
     pool: Cow<'a, PoolInner<M>>,
     conn: Option<Conn<M::Connection>>,
+    index: u32,
 }
 
 impl<'a, M> PooledConnection<'a, M>
@@ -331,13 +335,17 @@ where
     M: ManageConnection,
 {
     pub(crate) fn new(pool: &'a PoolInner<M>, conn: Conn<M::Connection>) -> Self {
+        let index = INDEXER.fetch_add(1, Ordering::SeqCst);
+        log::info!("index{} - Incremented in PooledConnection::new()", index);
         Self {
             pool: Cow::Borrowed(pool),
             conn: Some(conn),
+            index,
         }
     }
 
     pub(crate) fn drop_invalid(mut self) {
+        log::info!("index{} - PooledConnection::drop_invalid()", self.index);
         let _ = self.conn.take();
     }
 }
@@ -347,9 +355,13 @@ where
     M: ManageConnection,
 {
     pub(crate) fn new_owned(pool: PoolInner<M>, conn: Conn<M::Connection>) -> Self {
+        let index = INDEXER.fetch_add(1, Ordering::SeqCst);
+        log::info!("index{} - Incremented in PooledConnection::new_owned()", index);
+ 
         Self {
             pool: Cow::Owned(pool),
             conn: Some(conn),
+            index,
         }
     }
 }
@@ -389,9 +401,9 @@ where
     M: ManageConnection,
 {
     fn drop(&mut self) {
-        log::info!("PooledConnection::drop() start");
+        log::info!("index{} - PooledConnection::drop() start", self.index);
         self.pool.as_ref().put_back(self.conn.take());
-        log::info!("PooledConnection::drop() end");
+        log::info!("index{} - PooledConnection::drop() end", self.index);
     }
 }
 

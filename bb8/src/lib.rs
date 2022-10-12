@@ -32,7 +32,8 @@
 //! ```
 #![allow(clippy::needless_doctest_main)]
 #![deny(missing_docs, missing_debug_implementations)]
-
+use std::sync::atomic::{ AtomicU32, Ordering};
+pub(crate) static INDEXER: AtomicU32 = AtomicU32::new(0);
 mod api;
 pub use api::{
     Builder, CustomizeConnection, ErrorSink, ManageConnection, NopErrorSink, Pool,

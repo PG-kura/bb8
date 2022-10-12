@@ -12,6 +12,10 @@ use tokio::time::{interval_at, sleep, timeout, Interval};
 
 use crate::api::{Builder, ManageConnection, PooledConnection, RunError};
 use crate::internals::{Approval, ApprovalIter, Conn, SharedPool, State};
+use std::sync::atomic::{ AtomicU32, Ordering};
+use crate::INDEXER;
+
+
 
 pub(crate) struct PoolInner<M>
 where
@@ -118,11 +122,14 @@ where
     where
         F: Fn(&'a Self, Conn<M::Connection>) -> PooledConnection<'b, M>,
     {
+        let index = INDEXER.fetch_add(1, Ordering::SeqCst);
+        log::info!("index{} - Incremented in PoolInner", index);
+        let mut breaked = false;
         loop {
             let mut conn = {
-                log::info!("PoolInner::make_pooled(1) aquire lock");
+                log::info!("index{} - PoolInner::make_pooled(1) aquire lock", index);
                 let mut locked = self.inner.internals.lock();
-                log::info!("PoolInner::make_pooled(1) got lock");
+                log::info!("index{} - PoolInner::make_pooled(1) got lock", index);
                 match locked.pop(&self.inner.statics) {
                     Some((conn, approvals)) => {
                         self.spawn_replenishing_approvals(approvals);
@@ -132,12 +139,12 @@ where
                         make_pooled_conn(self, conn)
                     }
                     None => {
-                        log::info!("PoolInner::make_pooled(1) break loop");
+                        breaked = true;
                         break
                     },
                 }
             };
-            log::info!("PoolInner::make_pooled(1) release lock");
+            log::info!("index{} - PoolInner::make_pooled(1) release lock", index);
 
             if !self.inner.statics.test_on_check_out {
                 return Ok(conn);
@@ -152,36 +159,43 @@ where
                 }
             }
         }
+        if breaked {
+            log::info!("index{} - PoolInner::make_pooled(1) release lock", index);
+        }
 
         let (tx, rx) = oneshot::channel();
         {
             let res = {
-                log::info!("PoolInner::make_pooled(2) aquire lock");
+                log::info!("index{} - PoolInner::make_pooled(2) aquire lock", index);
                 let mut locked = self.inner.internals.lock();
-                log::info!("PoolInner::make_pooled(2) got lock");
+                log::info!("index{} - PoolInner::make_pooled(2) got lock", index);
                 let approvals = locked.push_waiter(tx, &self.inner.statics);
-                log::info!("PoolInner::make_pooled(2) approvals: {:?}", approvals);
+                log::info!("index{} - PoolInner::make_pooled(2) approvals: {:?}", index, approvals);
                 self.spawn_replenishing_approvals(approvals);
             };
-            log::info!("PoolInner::make_pooled(2) release lock");
+            log::info!("index{} - PoolInner::make_pooled(2) release lock", index);
             res
         };
 
         match timeout(self.inner.statics.connection_timeout, rx).await {
             Ok(Ok(mut guard)) => {
                 let res = {
-                    log::info!("PoolInner::make_pooled(3) extract");
+                    log::info!("index{} - PoolInner::make_pooled(3) extract", index);
                     let extracted = guard.extract();
-                    log::info!("PoolInner::make_pooled(3) make_pooled_conn() start");
+                    log::info!("index{} - PoolInner::make_pooled(3) make_pooled_conn() start", index);
                     // make_pooled_conn = |this, conn| PooledConnection::new(this, conn)
                     let res = make_pooled_conn(self, extracted);
-                    log::info!("PoolInner::make_pooled(3) make_pooled_conn() ended");
+                    log::info!("index{} - PoolInner::make_pooled(3) make_pooled_conn() ended", index);
                     Ok(res)
                 };
-                log::info!("PoolInner::make_pooled(3) guard dropped");
+                log::info!("index{} - PoolInner::make_pooled(3) guard dropped", index);
                 res
             },
-            _ => Err(RunError::TimedOut),
+            _ => {
+                log::info!("index{} - PoolInner::make_pooled(3) Timedout", index);
+
+                Err(RunError::TimedOut)
+            },
         }
     }
 
