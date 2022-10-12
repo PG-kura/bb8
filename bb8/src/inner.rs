@@ -106,9 +106,10 @@ where
     where
         F: Fn(&'a Self, Conn<M::Connection>) -> PooledConnection<'b, M>,
     {
+        let mut locked = self.inner.internals.lock();
+
         loop {
             let mut conn = {
-                let mut locked = self.inner.internals.lock();
                 match locked.pop(&self.inner.statics) {
                     Some((conn, approvals)) => {
                         self.spawn_replenishing_approvals(approvals);
@@ -133,12 +134,11 @@ where
         }
 
         let (tx, rx) = oneshot::channel();
-        {
-            let mut locked = self.inner.internals.lock();
-            let approvals = locked.push_waiter(tx, &self.inner.statics);
-            self.spawn_replenishing_approvals(approvals);
-        };
+        let approvals = locked.push_waiter(tx, &self.inner.statics);
 
+        drop(locked);
+
+        self.spawn_replenishing_approvals(approvals);
         match timeout(self.inner.statics.connection_timeout, rx).await {
             Ok(Ok(mut guard)) => Ok(make_pooled_conn(self, guard.extract())),
             _ => Err(RunError::TimedOut),
